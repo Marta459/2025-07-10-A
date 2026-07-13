@@ -1,0 +1,143 @@
+# GUIDA METODOLOGICA - ESAME TECNICHE DI PROGRAMMAZIONE
+
+## ORDINE DI LAVORO GENERALE
+
+1. Leggi TUTTO il testo prima di scrivere codice. Sottolinea: cosa sono i nodi, cosa sono gli archi, orientato o no, dove sta il peso, cosa succede in caso di parità/nodo isolato.
+2. Guarda lo schema ER e traccia A MANO il percorso tra le tabelle che ti servono (nodi, poi archi).
+3. Scrivi le query SQL SEPARATAMENTE su carta/testa prima di aprire il DAO. Testale su DBeaver PRIMA di metterle in Python.
+4. Solo dopo aver verificato i numeri su DBeaver, scrivi il codice Python (DAO -> Model -> Controller -> View).
+5. Testa SEMPRE confrontando i numeri con gli screenshot di esempio forniti nel testo.
+
+---
+
+## STEP 1 - DROPDOWN / DATEPICKER (popolamento iniziale)
+
+- DAO: query "SELECT DISTINCT colonna FROM tabella ORDER BY colonna"
+- Model: metodo passacarte, chiama solo il DAO
+- Controller: metodo fillDD...() che fa un ciclo `for x in self._model.getX(): self._view.dd.options.append(...)`
+- View: crea il Dropdown/DatePicker con `options=[]` (lista vuota, MAI None), POI chiama `self._controller.fillDD...()` DOPO averlo creato
+- ATTENZIONE: se nel dropdown devo mostrare un NOME ma mi serve un ID per le query dopo, uso:
+  `ft.dropdown.Option(key=str(id), text=nome)` — poi `.value` mi restituisce la key (id), non il testo
+
+## STEP 2 - CREAZIONE NODI
+
+- Query DAO: SELECT (DISTINCT!) id + campi utili, JOIN delle tabelle necessarie, WHERE con filtro (categoria/genere/ecc.), attenzione ai nomi ESATTI delle colonne (case-sensitive nel dizionario Python)
+- Model:
+  - `self._grafo = nx.Graph()` (non orientato) OPPURE `nx.DiGraph()` (orientato) — RILEGGI IL TESTO, cerca "orientato"/"diretto" vs "non orientato"
+  - dizionario `self._entita = {}` per tenere i dati anagrafici (id -> dizionario completo)
+  - ciclo: `self._entita[id] = e; self._grafo.add_node(id)`
+- Occhio a: DISTINCT per evitare duplicati, filtro su "posizione valida"/"traguardo tagliato"/date valide se richiesto dal testo
+
+## STEP 3 - CREAZIONE ARCHI
+
+Prima domanda da farsi SEMPRE: la relazione è simmetrica (stesso team, stesso cliente, entrambi venduti) o richiede un CONFRONTO tra due valori (popolarità, vendite, grado) per decidere un verso?
+
+### Caso A: relazione semplice, un solo self-join
+Esempio: compagni di squadra, stesso film.
+`FROM tabella t1, tabella t2 WHERE t1.chiave = t2.chiave AND t1.id < t2.id AND ...`
+(uso `<` per evitare duplicati e auto-abbinamento, va bene se il grafo NON è orientato)
+
+### Caso B: grafo orientato con direzione decisa da un valore (popolarità/vendite/ecc.)
+1. Query/dizionario per il "valore di confronto" (popolarità, vendite) per OGNI entità
+2. Query/logica per "chi è collegato a chi" (condizione di esistenza dell'arco - RILEGGI bene se serve self-join su più tabelle o su cliente/data)
+3. Se la condizione di collegamento è "entrambi esistono/sono stati venduti nel range" (nessun legame diretto tra loro) uso `itertools.combinations(nodi, 2)` per generare tutte le coppie di NODI (non di tutte le entità del db!)
+4. Per ogni coppia, ENTRAMBI devono avere un valore di confronto valido, altrimenti SKIP (continue) — nodo resta isolato
+5. Logica standard pareggio:
+```python
+if v1 > v2:
+    grafo.add_edge(id1, id2, weight=peso)
+elif v2 > v1:
+    grafo.add_edge(id2, id1, weight=peso)
+else:
+    grafo.add_edge(id1, id2, weight=peso)
+    grafo.add_edge(id2, id1, weight=peso)
+```
+
+### Checklist errori comuni negli archi
+- `<>` vs `<`: uso `<>` (o `!=`) se orientato e mi servono entrambe le direzioni come dati grezzi; uso `<` se non orientato o se voglio solo le coppie uniche
+- Il filtro di validità (data valida, traguardo tagliato, ecc.) va applicato SU ENTRAMBE le "metà" del self-join (due alias diversi tipo n1/n2)
+- Campi di testo con simboli (es. "$ 1234") vanno puliti con REGEXP_REPLACE(campo, '[^0-9]', '') prima del CAST, non solo REPLACE (più robusto)
+- Verificare sempre COUNT(*) DISTINCT su DBeaver PRIMA di scrivere il codice Python
+
+## STEP 4 - STATISTICHE SUL GRAFO (dopo "Crea Grafo")
+
+- Numero nodi/archi: `grafo.number_of_nodes()`, `grafo.number_of_edges()`
+- Top N archi di peso maggiore:
+```python
+tupla = [(u, v, dati["weight"]) for u, v, dati in grafo.edges(data=True)]
+ordinati = sorted(tupla, key=lambda x: x[2], reverse=True)[:N]
+```
+- Numero componenti connesse (solo grafi non orientati): `nx.number_connected_components(grafo)`
+- Componente più grande:
+```python
+componenti = nx.connected_components(grafo)
+massima, max_dim = None, 0
+for c in componenti:
+    if len(c) > max_dim:
+        max_dim = len(c)
+        massima = c
+```
+- Grado di un nodo: `grafo.degree(nodo)` (non orientato)
+- Influenza/punteggio in grafo orientato (uscenti - entranti):
+```python
+peso_out = sum(d["weight"] for _,_,d in grafo.out_edges(nodo, data=True))
+peso_in = sum(d["weight"] for _,_,d in grafo.in_edges(nodo, data=True))
+punteggio = peso_out - peso_in
+```
+
+## STEP 5 - CONTROLLER (pattern fisso)
+
+```python
+def handleX(self, e):
+    # self._view.txt_result.controls.clear()  <-- SOLO se è un'azione che "ricomincia" (es. Crea Grafo)
+    #                                             NON metterlo se il bottone aggiunge dettagli a quanto già creato
+    valore = self._view.componente.value
+    if valore is None:
+        self._view.txt_result.controls.append(ft.Text("Messaggio errore", color="red"))
+        self._view.update_page()
+        return
+    # eventuali altre validazioni (range invertito, ecc.)
+    if self._model.getGrafo() is None:   # <-- SOLO per bottoni che richiedono il grafo GIA' creato
+        self._view.txt_result.controls.append(ft.Text("Devi prima creare il grafo", color="red"))
+        self._view.update_page()
+        return
+    try:
+        risultato = self._model.metodo(valore)
+        self._view.txt_result.controls.append(ft.Text(...))
+        self._view.update_page()
+    except Exception as ex:
+        self._view.txt_result.controls.append(ft.Text(f"Errore: {ex}", color="red"))
+        self._view.update_page()
+```
+
+---
+
+## CHECKLIST BUG RICORRENTI (controllare SEMPRE prima di disperarsi)
+
+1. **Metodo chiamato senza parentesi**: `self._model.getX` invece di `self._model.getX()`
+2. **Due metodi con lo stesso nome nella classe**: l'ultimo sovrascrive il primo silenziosamente (es. il `pass` del professore rimasto insieme alla tua versione)
+3. **Nome variabile/chiave dizionario con typo**: ricopia ESATTAMENTE il nome dalla query SQL, non scriverlo a memoria
+4. **Tupla con un solo parametro**: `cursor.execute(query, (valore,))` — LA VIRGOLA è obbligatoria
+5. **Numero di `%s` diverso dal numero di parametri passati** in execute()
+6. **`and` vs `or` nella validazione**: per "manca almeno un campo" ci vuole SEMPRE `or`, non `and`
+7. **int() su un valore decimale**: se il dropdown ha valori con la virgola/punto, uso `float()` non `int()`
+8. **Ordine sbagliato**: `self._controller.fillDD()` chiamato PRIMA di aver creato il componente grafico nella View
+9. **View: attributo con underscore ma il Controller ci deve accedere**: se il Controller legge/scrive un componente della View, quel componente NON deve avere l'underscore (converzione di stile del progetto)
+10. **`self._grafo = nx.Graph()` nel costruttore invece di `None`**: rende inutile il controllo `is None` per "grafo non ancora creato"
+11. **GROUP BY incompleto**: ogni colonna nel SELECT non aggregata deve stare anche nel GROUP BY
+12. **DISTINCT(colonna)**: non restringe l'effetto ad una sola colonna, si applica sempre a tutta la riga
+13. **Campo testo con simboli valuta**: usare REGEXP_REPLACE più robusto di REPLACE
+14. **BETWEEN vuole AND**, non la virgola: `BETWEEN %s AND %s`
+15. Quando qualcosa "non funziona" ma non c'è errore visibile: guardare SEMPRE la console di PyCharm per il traceback completo, e confrontare SEMPRE i numeri ottenuti con quelli dell'esempio fornito nel testo
+
+---
+
+## DOMANDE DA FARSI PER OGNI NUOVO ESAME (in ordine)
+
+1. Il grafo è orientato o no? (cerca "diretto"/"orientato" nel testo)
+2. Cosa sono ESATTAMENTE i nodi? C'è un filtro di validità da applicare (data valida, posizione valida, ecc.)?
+3. Quando esiste un arco? È una relazione diretta (self-join semplice) o serve una condizione + un confronto per il verso?
+4. Cosa determina la direzione (se orientato)? Cosa succede in caso di parità?
+5. Cosa vale come peso dell'arco?
+6. Cosa devo stampare dopo "Crea Grafo"? (nodi/archi, top N, componenti connesse, influenza, ecc. - sono tutti pattern già pronti sopra)
+7. Punto 2: c'è un algoritmo di ricerca cammino/percorso da fare a parte (spesso ricorsivo)?

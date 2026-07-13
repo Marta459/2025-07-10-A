@@ -22,32 +22,35 @@ class View(ft.UserControl):
         self.btn_hello = None
         self.txt_result = None
         self.txt_container = None
+        self.ddcategory = None
 
     def load_interface(self):
         # title
         self._title = ft.Text("Esame del 10/07/2025 - Turno A", color="green", size=24)
         self._page.controls.append(self._title)
 
-        self._ddcategory = ft.Dropdown(label="Category", width=200)
+        self.ddcategory = ft.Dropdown(label="Category", width=200,options=[])
+        self._controller.fillddcategory()
 
-        self._dp1 = ft.DatePicker(
-            on_change=lambda e: print(f"Giorno selezionato: {self._dp1.value}"),
+
+        self.dp1 = ft.DatePicker(
+            on_change=lambda e: print(f"Giorno selezionato: {self.dp1.value}"),
             on_dismiss=lambda e: print("Data non selezionata")
         )
 
-        self._page.overlay.append(self._dp1)
+        self._page.overlay.append(self.dp1)
         self._btnCal1 = ft.ElevatedButton("Start date",
                                               icon=ft.icons.CALENDAR_MONTH,
-                                              on_click=lambda _: self._dp1.pick_date())
+                                              on_click=lambda _: self.dp1.pick_date())
 
-        self._dp2 = ft.DatePicker(
-            on_change=lambda e: print(f"Giorno selezionato: {self._dp2.value}"),
+        self.dp2 = ft.DatePicker(
+            on_change=lambda e: print(f"Giorno selezionato: {self.dp2.value}"),
             on_dismiss=lambda e: print("Data non selezionata")
         )
-        self._page.overlay.append(self._dp2)
+        self._page.overlay.append(self.dp2)
         self._btnCal2 = ft.ElevatedButton("End date",
                                               icon=ft.icons.CALENDAR_MONTH,
-                                              on_click=lambda _: self._dp2.pick_date())
+                                              on_click=lambda _: self.dp2.pick_date())
 
         self._controller.setDates()
 
@@ -56,7 +59,7 @@ class View(ft.UserControl):
         self._btnBestProdotti = ft.ElevatedButton(text="Prodotti più venduti",
                                            on_click=self._controller.handleBestProdotti)
 
-        row1 = ft.Row([self._ddcategory, self._btnCal1, self._btnCal2, self._btnCreaGrafo, self._btnBestProdotti],
+        row1 = ft.Row([self.ddcategory, self._btnCal1, self._btnCal2, self._btnCreaGrafo, self._btnBestProdotti],
                       alignment=ft.MainAxisAlignment.CENTER)
         self._page.controls.append(row1)
 
